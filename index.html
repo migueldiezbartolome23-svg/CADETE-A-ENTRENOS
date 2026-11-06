@@ -210,7 +210,7 @@ canvas{max-width:100%;}
 </head>
 <body>
 <div class="splash" id="splashScreen"><img src="logo-header.png" alt="Cadete A"></div>
-<div id="updateBanner" onclick="location.reload()" style="display:none;position:fixed;top:0;left:0;right:0;z-index:900;background:#D22630;color:#fff;text-align:center;padding:10px 14px calc(10px + env(safe-area-inset-top,0px));font-size:12.5px;font-weight:600;cursor:pointer;">🔄 Hay una versión más nueva — toca aquí para cargarla</div>
+<div id="updateBanner" onclick="actualizarApp()" style="display:none;position:fixed;top:0;left:0;right:0;z-index:900;background:#D22630;color:#fff;text-align:center;padding:10px 14px calc(10px + env(safe-area-inset-top,0px));font-size:12.5px;font-weight:600;cursor:pointer;">🔄 Hay una versión más nueva — toca aquí para cargarla</div>
 <div id="syncErrorBanner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:899;background:#8A5A00;color:#fff;text-align:center;padding:10px 14px calc(10px + env(safe-area-inset-top,0px));font-size:12px;font-weight:600;">⚠️ Sin sincronización con la nube — revisa la conexión o las reglas de Firebase (los datos se guardan solo en este dispositivo)</div>
 <div id="app">
   <header class="topbar">
@@ -493,7 +493,7 @@ canvas{max-width:100%;}
 
 <script>
 /* ===================== CONSTANTES Y ESTADO ===================== */
-const APP_VERSION = '31/10/2026 - 20:58';
+const APP_VERSION = '05/11/2026 - 18:44';
 const STORAGE_PREFIX = 'cdsp_cadeteA_';
 
 const FIREBASE_CONFIG = {
@@ -898,7 +898,7 @@ function activarSincronizacionEnVivo(){
   });
 
   document.addEventListener('visibilitychange', () => {
-    if(document.visibilityState === 'visible'){ refrescarDesdeFirebase(); comprobarVersion(); }
+    if(document.visibilityState === 'visible') refrescarDesdeFirebase();
   });
 }
 async function refrescarDesdeFirebase(){
@@ -909,13 +909,38 @@ async function refrescarDesdeFirebase(){
     if(remoto){ aplicarDatosRemotos(remoto); renderAll(); ocultarAvisoSync(); }
   }catch(e){ console.error('Error refrescando desde Firebase', e); mostrarAvisoSync(); }
 }
-async function comprobarVersion(){
+function leerSesion(k){ try{ return sessionStorage.getItem(k); }catch(e){ return null; } }
+function guardarSesion(k, v){ try{ sessionStorage.setItem(k, v); }catch(e){} }
+let ultimaComprobacionVersion = 0;
+/* Comprueba si hay una versión nueva publicada. Al abrir la app (auto=true) se recarga sola con la
+   versión nueva, saltándose la copia que el móvil tenga guardada; en el resto de momentos (volver a
+   la app, cada 10 min) solo avisa con la franja roja, para no cortar lo que estés haciendo. */
+async function comprobarVersion(auto){
+  if(!auto && Date.now() - ultimaComprobacionVersion < 60000) return;
+  ultimaComprobacionVersion = Date.now();
   try{
     const res = await fetch('version.txt?t=' + Date.now(), {cache:'no-store'});
     if(!res.ok) return;
     const remota = (await res.text()).trim();
-    if(remota && remota !== APP_VERSION) document.getElementById('updateBanner').style.display = 'block';
+    if(!remota || remota === APP_VERSION) return;
+    const clave = 'cdsp_auto_update_' + remota;
+    const hayModalAbierto = !!document.querySelector('.modal-overlay:not(.hidden)');
+    if(auto && !hayModalAbierto && !leerSesion(clave)){
+      guardarSesion(clave, '1');
+      location.replace(location.pathname + '?v=' + encodeURIComponent(remota));
+      return;
+    }
+    document.getElementById('updateBanner').style.display = 'block';
   }catch(e){ /* sin conexión o archivo no disponible: no hacemos nada */ }
+}
+function actualizarApp(){
+  location.replace(location.pathname + '?v=' + Date.now());
+}
+function iniciarVigilanciaVersion(){
+  document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible') comprobarVersion(false); });
+  window.addEventListener('pageshow', (e) => { if(e.persisted) comprobarVersion(false); });
+  window.addEventListener('focus', () => comprobarVersion(false));
+  setInterval(() => comprobarVersion(false), 10 * 60 * 1000);
 }
 
 function renderAll(){
@@ -2631,7 +2656,8 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   document.getElementById('modalOverlay').addEventListener('click', (e) => { if(e.target.id === 'modalOverlay') closeModal(); });
   init();
-  comprobarVersion();
+  comprobarVersion(true);
+  iniciarVigilanciaVersion();
 
   const splash = document.getElementById('splashScreen');
   setTimeout(() => splash.classList.add('hide'), 1300);
